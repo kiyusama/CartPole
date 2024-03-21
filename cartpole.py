@@ -116,12 +116,12 @@ for episode in range(num_episodes):
         targetNet.load_state_dict(target_net_state_dict)
 
         if total_reward >= 10000:
-            torch.save(policyNet.state_dict(), 'VSCode/PyTorch/CartPole2/elite_models/cartpole_dqn.pth')
+            torch.save(policyNet.state_dict(), 'PyTorch/CartPole2/elite_models/cartpole_dqn.pth')
             break
-
+        
+    torch.save(policyNet.state_dict(), 'PyTorch/CartPole2/models/cartpole_dqn.pth')
     print(f'Episode {episode} : total reward: {total_reward}')
     episode_rewards.append(total_reward)
-torch.save(policyNet.state_dict(), 'VSCode/PyTorch/CartPole2/models/cartpole_dqn.pth')
 
 plt.plot(episode_rewards)
 plt.title('Episode Rewards Over Time')
