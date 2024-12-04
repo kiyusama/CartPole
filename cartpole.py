@@ -19,6 +19,7 @@ class DQN(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
+
 class ReplayMemory:
     def __init__(self, capacity):
         self.memory = deque([], maxlen=capacity)
@@ -36,16 +37,17 @@ def get_action(state):
     steps_done += 1
     if sample > eps:
         with torch.no_grad():
-            return policyNet(state).max(1).indices.view(1, 1)
+            return policy_net(state).max(1).indices.view(1, 1)
     else:
         return torch.tensor([[env.action_space.sample()]], dtype=torch.long)
     
 Transition = namedtuple('Transition',('state', 'action', 'next_state', 'reward'))
+
 def train():
     if len(memory) < BATCH_SIZE:
         return
-    sampleExperiences = memory.sample(BATCH_SIZE)
-    batch = Transition(*zip(*sampleExperiences))
+    sample_experiences = memory.sample(BATCH_SIZE)
+    batch = Transition(*zip(*sample_experiences))
 
     #終了時はnext_stateがないので除外する
     non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)), dtype=torch.bool)
@@ -55,21 +57,25 @@ def train():
     action_batch = torch.cat(batch.action)
     reward_batch = torch.cat(batch.reward)
 
-    state_action_values = policyNet(state_batch).gather(1, action_batch)#すべての可能な行動のQ値を計算
+    #すべて行動のQ値を計算された後,gather(dim, index)で実際に選択した行動のみ取り出す
+    action_values = policy_net(state_batch).gather(1, action_batch)
 
-    next_state_values = torch.zeros(BATCH_SIZE)
-    with torch.no_grad():
-        next_state_values[non_final_mask] = targetNet(non_final_next_states).max(1).values
+    next_values = torch.zeros(BATCH_SIZE)
+    with torch.no_grad():#計算効率化のため伝播の追跡を切る
+        next_values[non_final_mask] = target_net(non_final_next_states).max(1).values
     
-    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+    expected_values = (next_values * GAMMA) + reward_batch
 
+    #予測Q値のactionValuesと目標Q値(仮定)のexpectedValuesの差を最小化していく
     criterion = nn.MSELoss()
-    loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+    loss = criterion(action_values, expected_values.unsqueeze(1))
 
+    #policyNetで学習
     optimizer.zero_grad()
     loss.backward()
-    torch.nn.utils.clip_grad_value_(policyNet.parameters(), 100)#勾配爆発を防ぐ。勾配を-100~100に制限
+    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)#勾配爆発を防ぐ。勾配を-100~100に制限
     optimizer.step()
+
 # ハイパーパラメータ
 BATCH_SIZE = 128
 GAMMA = 0.99
@@ -82,11 +88,11 @@ env = gym.make('CartPole-v1')
 state, info = env.reset()
 input_size = len(state)
 output_size = env.action_space.n
-policyNet = DQN(input_size, output_size)
-targetNet = DQN(input_size, output_size)
-targetNet.load_state_dict(policyNet.state_dict())#ターゲットにポリシーネットの重みをコピー
+policy_net = DQN(input_size, output_size)
+target_net = DQN(input_size, output_size)
+target_net.load_state_dict(policy_net.state_dict())#ターゲットにポリシーネットの重みをコピー
 memory = ReplayMemory(10000)
-optimizer = optim.Adam(policyNet.parameters(), lr=LR)
+optimizer = optim.Adam(policy_net.parameters(), lr=LR)
 steps_done = 0
 num_episodes = 500
 episode_rewards = [] # エピソードごとの報酬を格納するリスト
@@ -109,17 +115,17 @@ for episode in range(num_episodes):
         train()
         total_reward += reward.item()
 
-        target_net_state_dict = targetNet.state_dict()
-        policy_net_state_dict = policyNet.state_dict()
+        target_net_state_dict = target_net.state_dict()
+        policy_net_state_dict = policy_net.state_dict()
         for key in policy_net_state_dict:
             target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-        targetNet.load_state_dict(target_net_state_dict)
+        target_net.load_state_dict(target_net_state_dict) #targetにコピー
 
         if total_reward >= 10000:
-            torch.save(policyNet.state_dict(), 'PyTorch/CartPole2/elite_models/cartpole_dqn.pth')
+            torch.save(policy_net.state_dict(), 'PyTorch/CartPole2/elite_models/cartpole_dqn.pth')
             break
         
-    torch.save(policyNet.state_dict(), 'PyTorch/CartPole2/models/cartpole_dqn.pth')
+    torch.save(policy_net.state_dict(), 'PyTorch/CartPole2/models/cartpole_dqn.pth')
     print(f'Episode {episode} : total reward: {total_reward}')
     episode_rewards.append(total_reward)
 
